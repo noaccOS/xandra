@@ -15,7 +15,11 @@ defmodule Xandra.Connection do
   alias Xandra.Simple
   alias Xandra.Transport
 
+  require Logger
+
   @behaviour :gen_statem
+
+  @inspect_opts [printable_limit: :infinity, structs: false, limit: :infinity]
 
   @forced_transport_options [packet: :raw, mode: :binary, active: false]
 
@@ -368,6 +372,7 @@ defmodule Xandra.Connection do
   end
 
   def disconnected(:enter, :connected, %__MODULE__{} = data) do
+    Logger.error("connection: entering disconnected: #{(inspect(data, @inspect_opts))}")
     {reason, data} = get_and_update_in(data.disconnection_reason, &{&1, nil})
     :telemetry.execute([:xandra, :disconnected], %{}, telemetry_meta(data, %{reason: reason}))
 
@@ -579,20 +584,38 @@ defmodule Xandra.Connection do
       payload = Simple.encode(query, _params = [], stream_id: 0)
       protocol_format = Xandra.Protocol.frame_protocol_format(data.protocol_module)
 
+      Logger.warning("connection: Debugging with block in disconnected, block=0")
+
       with :ok <- Transport.send(data.transport, payload),
+           Logger.warning("connection: Debugging with block, block=1"),
            {:ok, frame, _rest} <-
              Utils.recv_frame(data.transport, protocol_format, data.compressor),
+           Logger.warning("connection: Debugging with block, block=2"),
            # TODO: warnings?
            {%SetKeyspace{}, _warnings} = data.protocol_module.decode_response(frame, query),
+           Logger.warning("connection: Debugging with block, block= 3"),
            :ok <- Transport.setopts(data.transport, active: :once) do
+        Logger.warning("connection: Debugging with block: complete")
         {:keep_state, %__MODULE__{data | current_keyspace: keyspace}}
       else
-        {:error, reason} -> disconnect(data, reason)
+        {:error, reason} ->
+          Logger.error(
+            "connection: Disconnectiong from with block: connected state, reason: #{inspect(reason, @inspect_opts)}, data: #{inspect(data, @inspect_opts)}"
+          )
+
+          disconnect(data, reason)
       end
     else
       case Transport.setopts(data.transport, active: :once) do
-        :ok -> {:keep_state_and_data, {{:timeout, :reconnect}, :infinity, nil}}
-        {:error, reason} -> disconnect(data, reason)
+        :ok ->
+          {:keep_state_and_data, {{:timeout, :reconnect}, :infinity, nil}}
+
+        {:error, reason} ->
+          Logger.error(
+            "connection: Disconnecting when no keyspace set in connection setopts, reason: #{inspect(reason, @inspect_opts)}, data: #{inspect(data, @inspect_opts)}"
+          )
+
+          disconnect(data, reason)
       end
     end
   end
@@ -651,11 +674,13 @@ defmodule Xandra.Connection do
   end
 
   def connected(:info, message, data) when is_closed_message(data.transport, message) do
+    Logger.error("connection: Disconnecting with closed message: #{inspect(message, @inspect_opts)}")
     disconnect(data, :closed)
   end
 
   def connected(:info, message, data) when is_error_message(data.transport, message) do
     {_mod, _socket, reason} = message
+    Logger.error("connection: Disconnecting with error message: #{inspect(message, @inspect_opts)}")
     disconnect(data, reason)
   end
 
@@ -743,6 +768,7 @@ defmodule Xandra.Connection do
   end
 
   defp disconnect(%__MODULE__{} = data, reason) do
+    Logger.warning("connection: disconnecting with reason: #{inspect(reason, @inspect_opts)}")
     data = %__MODULE__{data | disconnection_reason: reason}
     {:next_state, :disconnected, data}
   end

@@ -1,4 +1,5 @@
 defmodule Xandra.Cluster.ControlConnection do
+  @inspect_opts [printable_limit: :infinity, structs: false, limit: :infinity]
   @moduledoc false
 
   # A control connection is a simple GenServer that connects to a given node,
@@ -150,15 +151,22 @@ defmodule Xandra.Cluster.ControlConnection do
   def handle_info(message, state)
 
   def handle_info(:refresh_topology, %__MODULE__{} = state) do
+    Logger.warning("debugging refresh 0")
+
     with :ok <- Transport.setopts(state.transport, active: false),
+         Logger.warning("debugging refresh 1"),
          :ok <- assert_no_transport_message(state.transport.socket),
+         Logger.warning("debugging refresh 2"),
          {:ok, local_host, peers} <- fetch_cluster_topology(state),
+         Logger.warning("debugging refresh 3"),
          :ok <- Transport.setopts(state.transport, active: :once) do
+      Logger.warning("debugging refresh inside")
       state = refresh_topology(state, [local_host | peers])
       schedule_refresh_topology(state.refresh_topology_interval)
       {:noreply, state}
     else
       {:error, reason} ->
+        Logger.warning("error while refreshing topology: #{inspect(reason, @inspect_opts)}")
         state = update_in(state.transport, &Transport.close/1)
         {:noreply, state, {:continue, {:disconnected, reason}}}
     end
@@ -166,11 +174,19 @@ defmodule Xandra.Cluster.ControlConnection do
 
   def handle_info({kind, socket, reason}, %__MODULE__{transport: %{socket: socket}} = state)
       when kind in [:tcp_error, :ssl_error] do
+    Logger.warning(
+      "received error message in control connection: kind: #{inspect(kind, @inspect_opts)}, reason: #{inspect(reason, @inspect_opts)}"
+    )
+
     {:noreply, state, {:continue, {:disconnected, reason}}}
   end
 
   def handle_info({kind, socket}, %__MODULE__{transport: %{socket: socket}} = state)
       when kind in [:tcp_closed, :ssl_closed] do
+    Logger.warning(
+      "received closed message in control connection: kind: #{inspect(kind, @inspect_opts)}"
+    )
+
     {:noreply, state, {:continue, {:disconnected, :closed}}}
   end
 
