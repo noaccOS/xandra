@@ -126,7 +126,7 @@ defmodule Xandra.Cluster.ControlConnection do
         send(state.cluster_pid, {:host_up, state.ip, state.port})
 
         # We set up a timer to periodically refresh the topology.
-        schedule_refresh_topology(state.refresh_topology_interval)
+        # schedule_refresh_topology(state.refresh_topology_interval)
 
         {:ok, state}
 
@@ -162,7 +162,7 @@ defmodule Xandra.Cluster.ControlConnection do
          :ok <- Transport.setopts(state.transport, active: :once) do
       Logger.warning("debugging refresh inside")
       state = refresh_topology(state, [local_host | peers])
-      schedule_refresh_topology(state.refresh_topology_interval)
+      # schedule_refresh_topology(state.refresh_topology_interval)
       {:noreply, state}
     else
       {:error, reason} ->
